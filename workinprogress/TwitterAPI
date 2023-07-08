@@ -1,0 +1,58 @@
+# %pip install scraper
+# %pip install classifier
+
+#%pip install tweepy
+#%pip install textblob
+
+import tweepy
+from textblob import TextBlob
+import pandas as pd
+
+# Twitter API credentials
+api_key = "pc3BLOU3REm0cyrh8ERCEt834"
+api_secret = "oWqMY6E1KZvTnlJG6dbFoRMSOOH3gPhyT03kCWmPtuHfhM8Y2B"
+access_token = "1639304469878824960-drCGPHRw3DfIIoofN8Eqj1Safi9A8y"
+access_token_secret = "iV1s61fwPMRkBdNroQ2d4HerEGbzjWhsxMujepAewvVEw"
+
+# Authenticating with Twitter API
+auth = tweepy.OAuthHandler(api_key, api_secret)
+auth.set_access_token(access_token, access_token_secret)
+
+# Creating API object
+api = tweepy.API(auth)
+
+# Function to scrape NBA comments from Twitter
+def scrape_nba_comments():
+    nba_comments = []
+
+    # Scraping tweets containing NBA-related keywords
+    tweets = tweepy.Cursor(api.search_tweets, q="NBA", tweet_mode="extended").items(1000)
+
+    for tweet in tweets:
+        # Checking if the tweet has comments
+        if hasattr(tweet, "comments"):
+            # Fetching the comments
+            comments = tweet.comments()
+
+            for comment in comments:
+                # Extracting the comment text
+                comment_text = comment.full_text
+
+                # Adding the comment to the list
+                nba_comments.append(comment_text)
+
+    return nba_comments
+
+# Scrape NBA comments from Twitter
+nba_comments = scrape_nba_comments()
+
+# Perform sentiment analysis on the comments
+for comment in nba_comments:
+    blob = TextBlob(comment)
+    sentiment = blob.sentiment
+
+    # Print the comment and its sentiment
+    print("Comment:", comment)
+    print("Sentiment: Polarity =", sentiment.polarity, "Subjectivity =", sentiment.subjectivity)
+    print()
+

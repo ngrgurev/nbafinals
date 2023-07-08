@@ -1,0 +1,105 @@
+This is the first part of the project, where I'll build simple web scraper using library called Playwright. I found Playwright to be very useful when it came down to scraping basketball-reference.com with its built-in solutions for all the issues one could face when it comes to web scraping, such as poor connection, time-outs and such. Playwright creates virtual browser and stores data in .html format. 
+### 1. Import and install packages
+import os 
+import asyncio
+from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
+import time
+#configuring playwright
+
+%pip install pytest-playwright
+%pip install --upgrade playwright
+%playwright install
+# creating a list for all the seasons we're going to scrape
+SEASONS = list(range(2016, 2023))
+SEASONS
+# directory for storing data
+DATA_DIR = "data"
+STANDINGS_DIR = os.path.join(DATA_DIR, "standings")
+SCORES_DIR = os.path.join(DATA_DIR, "scores")
+async def get_html(url, selector, sleep=3, retries=3):
+    html = None
+    for i in range(1, retries+1):
+        time.sleep(sleep * i)  # Function to scrape slower, each sleep adds 5 more seconds to the next one
+        
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch()
+                page = await browser.new_page()
+                await page.goto(url)
+                print(await page.title())
+                html = await page.inner_html(selector)
+        except PlaywrightTimeout:
+            print(f"Timeout error on {url}")
+            continue
+        else:
+            break  # If the scrape is successful, break the loop
+    return html
+# function for scraping seasons 
+
+async def scrape_season(season):
+    url = f"https://www.basketball-reference.com/leagues/NBA_{season}_games.html"
+    html = await get_html(url, "#content .filter")
+    
+    soup = BeautifulSoup(html, "html.parser")
+    links = soup.find_all("a")
+    standings_pages = [f"https://www.basketball-reference.com{l['href']}" for l in links]
+    
+    for url in standings_pages:
+        save_path = os.path.join(STANDINGS_DIR, url.split("/")[-1])
+        if os.path.exists(save_path):
+            continue
+        
+        html = await get_html(url, "#all_schedule")
+        with open(save_path, "w+") as f:
+            f.write(html)
+for season in SEASONS:
+    await scrape_season(season)
+standings_files = os.listdir(STANDINGS_DIR)
+#function for scraping games
+
+async def scrape_game(standings_file):
+    with open(standings_files, 'r') as f:
+        html = f.read()
+
+    soup = BeautifulSoup(html, "html.parser")
+    links = soup.find_all("a")
+    hrefs = [l.get('href') for l in links]
+    box_scores = [f"https://www.basketball-reference.com{l}" for l in hrefs if l and "boxscore" in l and ".html" in l]
+
+    for url in box_scores:
+        save_path = os.path.join(SCORES_DIR, url.split("/")[-1])
+        if os.path.exists(save_path):
+            continue
+
+        html = await get_html(url, "#content")
+        if not html:
+            continue
+        with open(save_path, "w+") as f:
+            f.write(html)
+async def main():
+    await asyncio.gather(*[scrape_season(season) for season in SEASONS])
+
+    standings_files = os.listdir(STANDINGS_DIR)
+    standings_files = [s for s in standings_files if ".html" in s]
+
+    await asyncio.gather(*[scrape_game(os.path.join(STANDINGS_DIR, f)) for f in standings_files])
+
+# Run the main function
+asyncio.run(main())
+## 
+
+#import pandas as pd
+
+#standings_files = [s for s in standings_files if ".html" in s]
+
+# for season in SEASONS:
+#    files = [s for s in standings_files if str(season) in s]
+    
+ #   for f in standings_files:
+   #     filepath = os.path.join(STANDINGS_DIR, f)
+  #      
+    #    await scrape_game(filepath)
+I did not want to process my data as I was scraping, so what happens is that we're scraping the pages as .html file, which is later supplemented with the rest of the URL, and saved into two directories: standings and scores. After we've downloaded all the data we had, thanks to beautifulsoup we can proceed to parse, clean and iretate all the data, preparing it for the machine learning part of this project.
+
+One more thing worth mentioning, which I find to be useful, is that playwright files that are saved as .html do not contain any CSS, so you're basically getting a blank page that is easier to inspect and scrape. All the data can be found in "data" directory.  

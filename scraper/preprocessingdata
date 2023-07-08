@@ -1,0 +1,106 @@
+In this part of the project, our goal is to parse the scores into the Pandas dataframe, which we'll pass into machine learning later. 
+### 1. Importing libraries and defining directories
+import os 
+import pandas as pd 
+from bs4 import BeautifulSoup
+# defining score directory 
+SCORE_DIR = "data/scores"
+# read all our boxscores
+box_scores = os.listdir(SCORE_DIR)
+box_scores = [os.path.join(SCORE_DIR, f) for f in box_scores if f.endswith(".html")]
+### 2. Defining function for extracting data from scraped htmls
+# %pip install lxml
+# in case there's an error, this library is used to process XML and HTML in Python
+# function for parsing and cleaning html
+
+def parse_html(box_score):
+    with open(box_score) as f: #path to boxscore
+        html = f.read()
+        
+    soup = BeautifulSoup(html) #instance to parse
+    [s.decompose() for s in soup.select("tr.over_header")] #removing overheader from html
+    [s.decompose() for s in soup.select("tr.thead")] #removing thead from html
+    return soup
+#function to read season information - season number
+
+def read_season_info(soup):
+    nav = soup.select("#bottom_nav_container")[0]
+    hrefs = [a["href"] for a in nav.find_all('a')]
+    season = os.path.basename(hrefs[1]).split("_")[0]
+    return season
+# function to read line score that indicates who won the game and no of points
+
+def read_line_score(soup):
+    line_score = pd.read_html(str(soup), attrs={'id': 'line_score'})[0] #using pandas to specifically read line_score table
+    cols = list(line_score.columns) #column names to the list so we can rename
+    cols[0] = "team"
+    cols[-1] = "total"
+    line_score.columns = cols
+    
+    line_score = line_score[["team", "total"]] #removing quarter scores and leaving only total because of OTs that can create issues while creating dataframe
+    return line_score
+# function to read statistics
+
+def read_stats(soup, team, stat):
+    df = pd.read_html(str(soup), attrs={'id': f'box-{team}-game-{stat}'}, index_col=0)[0] #using pandas to specifically read game stats
+    df = df.apply(pd.to_numeric, errors="coerce") #convert columns to numeric because there are strings, and if there is string add "NaN" instead of string
+    return df
+base_cols = None
+games = []
+for box_score in box_scores:
+    soup = parse_html(box_score)
+    
+    line_score = read_line_score(soup)
+    teams = list(line_score["team"]) #grabbing team tags 
+
+    summaries = []
+    for team in teams:
+        basic = read_stats(soup, team, "basic") #reading basic statistics from basic box score
+        advanced = read_stats(soup, team, "advanced") #reading advanced statistics from advanced box score
+
+        totals = pd.concat([basic.iloc[-1,:], advanced.iloc[-1,:]]) #last row of basic and advanced dataframe and concat them - put them in a single row
+        totals.index = totals.index.str.lower() #columns to lowercase
+
+        maxes = pd.concat([basic.iloc[:-1].max(), advanced.iloc[:-1].max()]) #all rows but last one - this takes player with the max value and outputs the best value 
+        maxes.index = maxes.index.str.lower() + "_max" #adding max to name of the columns to avoid conflict with totals
+
+        summary = pd.concat([totals,maxes]) #putting them together like single row = single game
+
+        #making sure we're getting the same stats for every single game
+        if base_cols is None:
+            base_cols = list(summary.index.drop_duplicates(keep="first")) #selecting only columns from the first summary and dropping duplicates if there are any
+            base_cols = [b for b in base_cols if "bpm" not in b] #dropping bpm because it's not a constant variable
+
+        summary = summary[base_cols]
+
+        summaries.append(summary)
+    summary = pd.concat(summaries, axis=1).T #concating our summaries in the single summary and turning dataframe that columns are statistics (without T function columns would be 0 and 1)
+
+    game = pd.concat([summary, line_score], axis=1) #combining summary and line score values 
+
+    game["home"] = [0, 1] #column to indicate home team, 0 is away, 1 is home
+    
+    game_opp = game.iloc[::-1].reset_index() #adding opponent stats and reversing the dataframe so away team is located as home
+    game_opp.columns += "_opp" 
+
+    full_game = pd.concat([game, game_opp], axis=1) #merging game and gameopp stats in one dataframe
+   
+    full_game["season"] = read_season_info(soup) #adding season info to df
+
+    full_game["date"] = os.path.basename(box_score)[:8] 
+    full_game["date"] = pd.to_datetime(full_game["date"], format="%Y%m%d") #adding date info to df from filename which is formatted as year-month-day
+
+    full_game["won"] = full_game["total"] > full_game["total_opp"] #specifying who won the game by comparing no of points
+    games.append(full_game) #appending full game to the list
+    
+    if len(games) % 100 == 0:
+        print(f"{len(games)} / {len(box_scores)}") #printing progress message aka status of the loop
+games_df = pd.concat(games, ignore_index=True) #when the run is over this function combines games and treats one game as a one row
+
+#saving new dataframe to csv file which we'll use for machine learning
+games_df.to_csv("machine_learning.csv")
+And we're finished. Combining two notebooks, we've got all the necessary data, parsed information, cleaned it and stored in new csv file which we'll load later on. I've put a lot of comments while I was writing the code because this was something new to me and I wanted to record as much steps as possible for further instructions. 
+
+Our data is ready to be processed through the machine learning.
+
+Before we start with the ML, I will introduce some outsocred data for the EDA part of the project, where we'll try to answer some of the most asked questions in the NBA universe.
